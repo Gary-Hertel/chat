@@ -1,11 +1,22 @@
 import asyncio
+import requests
 
 from typing import Dict, List
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from starlette.middleware.cors import CORSMiddleware  # 引入 CORS 中间件模块
 
 
 app = FastAPI()
+
+
+# 设置跨域传参
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 设置允许的origins来源
+    allow_credentials=True,
+    allow_methods=["*"],  # 设置允许跨域的http方法，比如 get、post、put等。
+    allow_headers=["*"])  # 允许跨域的headers，可以用来鉴别来源等作用。
 
 
 class RoomManager:
@@ -40,31 +51,47 @@ class RoomManager:
 room_manager = RoomManager()
 
 
+@app.get("/random_name")
+def get_random_name():
+    url = "https://api.iyk0.com/sjxm"
+    response = requests.get(url).json()
+    name = response.get("name")
+    return {"data": name}
+
+
+@app.get("/random_avatar")
+def get_random_avatar():
+    url = "https://api.iyk0.com/sjtx/?msg=%E5%A5%B3"
+    response = requests.get(url).json()
+    img = response.get("img")
+    return {"data": img}
+
+
 @app.websocket("/{room_name}")
 async def websocket_endpoint(websocket: WebSocket, room_name: str):
     
-    username = ""
     await room_manager.connect(websocket, room_name)
+    data: dict = await websocket.receive_json()
+    username = data.get("username")
+    await room_manager.broadcast_message(
+        room_name,
+        {"username": username, "text": f"{username} join", "status": "join"},
+        websocket
+    )
     
     try:
-        
         while True:
             await asyncio.sleep(0.1)
             data: dict = await websocket.receive_json()
-            if not username:
-                username = data.get("username")
-                data.update(status="join")
-            else:
-                data.update(status="speak")
             await room_manager.broadcast_message(room_name, data, websocket)
 
     except WebSocketDisconnect:
         await room_manager.disconnect(websocket, room_name)
-        await room_manager.broadcast_message(room_name, {"username": username, "text": f"{username} has left", "status": "left"}, websocket)
+        await room_manager.broadcast_message(room_name, {"username": username, "text": f"{username} left", "status": "left"}, websocket)
 
 
 if __name__ == "__main__":
     
     import uvicorn
-    msg = {"username": "smith", "text": "do not go gentle to that good night", "status": "speak"}
-    uvicorn.run(app='main:app', host="0.0.0.0", port=8080, reload=True, debug=True)
+    
+    uvicorn.run(app='main:app', host="0.0.0.0", port=8501, reload=True, debug=True)
